@@ -52,6 +52,7 @@ Usage: ${0} \\
   -j/--disable-output-json \\
   -n/--no-color \\
   -t/--lock-table \\
+  -s/--lock-s3 \\
   -w/--compact-warnings \\
   -- \\
   <additional arguments to forward to the terraform binary call>
@@ -110,6 +111,11 @@ lock-table (optional):
   to use a DynamoDB table with the same name as the S3 bucket
   for terraform state locking.
 
+lock-s3 (optional):
+  Adds use_lockfile = true to the S3 backend configuration for S3 state
+  locking. Requires Terraform 1.10 or later. Can be used with --lock-table
+  while migrating from DynamoDB locking.
+
 no-color (optional):
  Append -no-color to all terraform calls
 
@@ -140,8 +146,8 @@ fi
 ##
 readonly raw_arguments="${*}";
 ARGS=$(getopt \
-         -o dhjntvwa:b:c:e:g:i:l:p:r: \
-         -l 'help,version,bootstrap,action:,bucket-prefix:,build-id:,component:,environment:,group:,groups:,project:,region:,lockfile:,detailed-exitcode,lock-table,no-color,compact-warnings,disable-output-json' \
+         -o dhjntvswa:b:c:e:g:i:l:p:r: \
+         -l 'help,version,bootstrap,action:,bucket-prefix:,build-id:,component:,environment:,group:,groups:,project:,region:,lockfile:,detailed-exitcode,lock-table,lock-s3,no-color,compact-warnings,disable-output-json' \
          -n "${0}" \
          -- \
          "${@}");
@@ -166,6 +172,7 @@ declare lockfile='';
 declare project='';
 declare detailed_exitcode='';
 declare lock_table='';
+declare lock_s3='false';
 declare no_color='';
 declare compact_warnings='';
 declare output_json='true';
@@ -266,6 +273,10 @@ while true; do
       shift;
       lock_table='true';
       ;;
+    -s|--lock-s3)
+      shift;
+      lock_s3='true';
+      ;;
     -n|--no-color)
       shift;
       no_color="-no-color";
@@ -281,7 +292,7 @@ while true; do
   esac;
 done;
 
-declare extra_args="${@} ${no_color}"; # All arguments supplied after "--"
+declare extra_args="${*:-} ${no_color}"; # All arguments supplied after "--"
 
 ##
 # Script Set-Up
@@ -571,15 +582,17 @@ declare -a tf_var_file_paths;
 # the warning about duplicate variables below) we add this to the list after
 # global and region-global variables, but before the environment variables
 # so that the environment can explicitly override variables defined in the group(s).
-for group_name in "${groups[@]}"; do
-  declare group_vars_file_name="group_${group_name}.tfvars";
-  declare group_vars_file_path="${base_path}/etc/${group_vars_file_name}";
-  if [ -f "${group_vars_file_path}" ]; then
-    tf_var_file_paths+=("${group_vars_file_path}");
-  else
-    echo -e "[WARNING] Group \"${group_name}\" has been specified, but no group variables file is available at ${group_vars_file_path}";
-  fi;
-done;
+if [ -n "${group}" ]; then
+  for group_name in "${groups[@]}"; do
+    declare group_vars_file_name="group_${group_name}.tfvars";
+    declare group_vars_file_path="${base_path}/etc/${group_vars_file_name}";
+    if [ -f "${group_vars_file_path}" ]; then
+      tf_var_file_paths+=("${group_vars_file_path}");
+    else
+      echo -e "[WARNING] Group \"${group_name}\" has been specified, but no group variables file is available at ${group_vars_file_path}";
+    fi;
+  done;
+fi;
 
 # Environment is normally expected, but in bootstrapping it may not be provided
 if [ -n "${environment}" ]; then
@@ -691,6 +704,11 @@ if [ -n "${backend_profile}" ]; then
     profile        = \"${backend_profile}\"";
 fi;
 
+declare backend_s3_lock_config='';
+if [ "${lock_s3}" == 'true' ]; then
+  backend_s3_lock_config=$'\n    use_lockfile   = true';
+fi;
+
 declare backend_config='';
 if [ "${lock_table}" == 'true' ]; then
   backend_config="terraform {
@@ -699,7 +717,7 @@ if [ "${lock_table}" == 'true' ]; then
     bucket         = \"${bucket}\"
     key            = \"${backend_key}\"
     encrypt        = true
-    dynamodb_table = \"${bucket}\"${backend_profile_config}
+    dynamodb_table = \"${bucket}\"${backend_s3_lock_config}${backend_profile_config}
   }
 }";
 else
@@ -708,7 +726,7 @@ else
     region  = \"${region}\"
     bucket  = \"${bucket}\"
     key     = \"${backend_key}\"
-    encrypt = true${backend_profile_config}
+    encrypt = true${backend_s3_lock_config}${backend_profile_config}
   }
 }";
 fi;
@@ -753,6 +771,7 @@ if [ "${bootstrapped}" == 'true' ]; then
   # Configure remote state storage
   echo "Setting up S3 remote state from s3://${bucket}/${backend_key}";
   [ "${lock_table}" == 'true' ] && echo "Using DynamoDB Table for state locking: ${bucket}";
+  [ "${lock_s3}" == 'true' ] && echo 'Using S3 lockfile for state locking';
   ${terraform_bin} init ${no_color} ${lockfile_or_upgrade} \
     || error_and_die 'Terraform init failed';
 

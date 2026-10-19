@@ -138,6 +138,7 @@ bin/terraform.sh \
   -d/--detailed-exitcode   (optional) \
   -j/--disable-output-json (optional) \
   -t/--lock-table          (optional) \
+  -s/--lock-s3             (optional) \
   -n/--no-color            (optional) \
   -w/--compact-warnings    (optional) \
   -- \
@@ -164,6 +165,7 @@ Where:
 * `detailed-exitcode` (optional): Passes detailed exit code flag to terraform.
 * `disable-output-json` (optional): Disables writing a `.terraform.output.json` file when component outputs are updated
 * `lock-table` (optional): Tells tfscaffold to use a DynamoDB Table with the same name as the S3 Bucket for state file locking
+* `lock-s3` (optional): Enables native S3 state locking by adding `use_lockfile = true` to the generated backend configuration. Requires Terraform 1.10 or later. The Terraform role needs `s3:GetObject`, `s3:PutObject`, and `s3:DeleteObject` on the lock object (`<state-key>.tflock`). Use alongside `--lock-table` while older runs still rely on DynamoDB locking; once all runs use S3 locking, the table is no longer needed for locking.
 * `no-color` (optional): Passes no-color flag to terraform.
 * `compact-warnings` (optional): Passes compact-warnings flag to terraform.
 * `additional arguments`: Any arguments provided after "--" will be passed directly to terraform as its own arguments, e.g. allowing the provision of a 'target=value' parameter.

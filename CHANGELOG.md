@@ -1,3 +1,16 @@
+## Unreleased
+
+FEATURES:
+
+ * terraform.sh: added `-s`/`--lock-s3` to enable native S3 state locking
+   with Terraform 1.10 or later. It can be used with `--lock-table` while
+   migrating from DynamoDB locking.
+
+BUG FIXES:
+
+ * terraform.sh: fixed empty forwarded arguments and group lists under
+   macOS Bash 3.2 with `set -u`.
+
 ## 2.3.2 (24/04/2026)
 
 FEATURES:
